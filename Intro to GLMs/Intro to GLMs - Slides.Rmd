@@ -1,0 +1,327 @@
+---
+title: "Intro to Generalized Linear Models"
+subtitle: "UCR GradQuant"
+author: "Nicholas R. Jenkins"
+date: "December 2, 2021"
+output:
+  ioslides_presentation: 
+    widescreen: true
+    logo: UCR_Icon_WhtBG.png
+    incremental: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+# The General Linear Model
+
+## Forget generalizing it, what is the general linear model? {.build}
+
+* The general linear model is just the same basic linear regression model you know and love. 
+
+$$y = \alpha + \beta x_i + \epsilon$$
+
+* But this way of writing regression equations hides a lot of assumptions
+
+## Revealing the assumptions of your model {.build}
+
+* To see what we're hiding, let's write this same model a different way
+
+$$
+\begin{aligned}
+  y &\sim \text{Normal}(\mu_i, 0) \\
+  \mu_i &= \alpha + \beta \times x_i
+\end{aligned}
+$$
+
+* $\sim$ means "distributed"
+
+* So, $y$ is normally distributed with a mean of $\mu$ and a standard deviation of 0
+
+* We want to estimate the *average* outcome, which is why we "model" the mean
+
+* To model the mean of our outcome, we use some linear equation: $\mu = \alpha + \beta * x$
+
+## Revealing the assumptions of your model {.build}
+
+So, 
+
+$$
+\begin{aligned}
+  y &\sim \text{Normal}(\mu_i, 0) \\
+  \mu_i &= \alpha + \beta \times x_i
+\end{aligned}
+$$
+
+is the more complete way to express
+
+$$y = \alpha + \beta x_i + \epsilon$$
+
+because it tells us what likelihood and link (more on this later) functions we are using
+
+## What are likelihood functions, again?
+
+* Likelihood functions are essentially probability models of our data
+
+* They describe the data generating process
+
+* Ultimately the goal of statistics is to build a model that can make accurate predictions and describe data
+
+* We do this by choosing likelihood functions that describe observed data
+
+# Generalizing the General Linear Model
+
+## What if the normal distribution doesn't describe our data?
+
+```{r include = FALSE}
+library(tidyverse)
+library(nycflights13)
+data(flights)
+flights <- 
+  flights %>% 
+  mutate(flight_delayed = case_when(dep_delay > 0 ~ "Delayed",
+                                    dep_delay < 0 ~ "Early"),
+         delayed = ifelse(flight_delayed == "Delayed", 1, 0),
+         distance_c = distance - mean(distance),
+         distance_2sd = sjmisc::std(distance, robust = "2sd")) %>% 
+  sample_n(size = 2000)
+```
+
+As an example, we're going to use data on flights in the US:
+
+```{r}
+head(flights)
+```
+
+## What if the normal distribution doesn't describe our data? {.build}
+
+* Let's try to see if the distance of a flight can predict whether the flight is delayed or not
+
+* What probability model would describe flight delays? The normal distribution?
+
+## Modeling Flight Delays
+
+```{r warning = FALSE}
+ggplot(flights, aes(x = delayed)) +
+  geom_density()
+```
+
+## Modeling Flight Delays {.build}
+
+* The normal distribution doesn't sound right to me
+
+* The normal distribution describes a data generating process that produces continuous values from $-\infty$ to $\infty$ 
+
+* Let's run with it anyway
+
+```{r echo = TRUE, eval = FALSE}
+normal.fit <- glm(delayed ~ distance_2sd,
+                  family = gaussian(),
+                  data = flights)
+```
+
+## Modeling Flight Delays
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+library(brms)
+library(cmdstanr)
+normal.fit <- brm(delayed ~ distance_2sd,
+                  family = gaussian(),
+                  data = flights,
+                  backend = "cmdstan",
+                  cores = 4)
+```
+
+```{r warning = FALSE, message = FALSE}
+library(bayesplot)
+pp_check(normal.fit)
+```
+
+## Modeling Flight Delays {.build}
+
+* The normal distribution doesn't model the data very well
+
+* We need a likelihood function that describes a data generating process that produces discrete values of either 0 or 1
+
+* The binomial and Bernoulli distributions both describe that process
+
+## Modeling Flight Delays {.build}
+
+$$
+\begin{aligned}
+  y_i &\sim \text{Binomial}(1, p_i) \\
+  \text{logit}(p_i) &= \alpha + \beta \times x
+\end{aligned}
+$$
+
+* What is our likelihood function? 
+
+* What is our link function?
+
+## Wait, what is a link function?
+
+* Link functions are used to map the range of a linear equation to the range of the outcome variable
+
+* The logit link function restricts the range of the linear equation to be either 0 or 1
+
+* The log link function restricts the range of the linear equation to be positive, continuous, and greater than 0
+
+## Connecting the Dots
+
+* Our models always use the same linear structure ($\mu_i = \alpha + \beta x_i$)
+
+* But, we can use any likelihood and link function that we want
+
+* With these two pieces, we can **generalize** our linear equation to model any type of data
+
+* Hence, the **generalized linear model**
+
+* It always has a linear equation, but it doesn't always have a normal distribution!
+
+## Modeling Flight Delays {.build}
+
+* Let's model flight delays with a more realistic likelihood function - the binomial
+
+$$
+\begin{aligned}
+  y_i &\sim \text{Binomial}(1, p_i) \\
+  \text{logit}(p_i) &= \alpha + \beta \times x
+\end{aligned}
+$$
+
+```{r echo = TRUE, eval = TRUE}
+binomial.fit <- glm(delayed ~ distance_2sd,
+                    family = binomial(link = "logit"),
+                    data = flights)
+```
+
+## Modeling Flight Delays {.build}
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+binomial.bfit <- brm(delayed ~ distance_2sd,
+                     family = bernoulli(link = "logit"),
+                     data = flights,
+                     backend = "cmdstan",
+                     cores = 4)
+```
+
+```{r warning = FALSE, message = FALSE}
+pp_check(binomial.bfit)
+```
+
+## How do we intrepret models with different likelihood and link functions?
+
+* All you have to do is "undo" the link function
+
+* Logit link function: $\ln \left( \frac{P}{1 - P} \right)$
+
+* Inverse logit link function: $\frac{1}{1 + \exp^{(P)}}$
+
+* Inverse logit link function in R: `plogis()`
+
+## How do we intrepret models with different likelihood and link functions?
+
+```{r}
+coef(binomial.fit)
+```
+
+```{r include = TRUE, echo = TRUE}
+plogis(coef(binomial.fit))
+```
+
+A one unit increase in `distance_2sd` increases the relative probability of having a delayed flight by about `r round(plogis(coef(binomial.fit)[[2]]), digits = 2) * 100`%
+
+## The Flexibility of GLMs
+
+* GLMs can be used to model any type of data (just about)
+
+* Pick a realistic likelihood function, then pick a link function
+
+## Modeling Test
+
+```{r include = FALSE}
+data("warpbreaks")
+
+glimpse(warpbreaks)
+```
+
+We want to model yard breaks as a function of the type of wool and the tension applied. 
+
+## Modeling Test
+
+```{r}
+hist(warpbreaks$breaks)
+```
+
+## Modeling Test
+
+What kind of a distribution do we need?
+
+* Continuous or discrete?
+
+* Positive only, negative only, or all numbers?
+
+## Modeling Test {.build}
+
+* Poisson is discrete and positive only
+
+* What kind of link function?
+
+$$
+\begin{aligned}
+  y_i &\sim \text{Poisson}(\lambda_i) \\
+  \text{log}(\lambda_i) &= \alpha + \beta \times x
+\end{aligned}
+$$
+
+```{r echo = TRUE, eval = TRUE}
+poisson.fit <- glm(breaks ~ wool + tension,
+                   family = poisson(link = "log"),
+                   data = warpbreaks)
+```
+
+## Modeling Test
+
+What if we just used a normal likelihood function?
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+poisson.lin.bfit <- brm(breaks ~ wool + tension,
+                        data = warpbreaks,
+                        backend = "cmdstan",
+                        cores = 4)
+```
+
+```{r warning = FALSE, message = FALSE}
+pp_check(poisson.lin.bfit)
+```
+
+## Modeling Test
+
+Now with a Poisson likelihood:
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+poisson.bfit <- brm(breaks ~ wool + tension,
+                    family = negbinomial(link = "log"),
+                    data = warpbreaks,
+                    backend = "cmdstan",
+                    cores = 4)
+```
+
+```{r warning = FALSE, message = FALSE}
+pp_check(poisson.bfit)
+```
+
+## Modeling Test
+
+How would we interpret the coefficients from a Poisson regression?
+
+```{r}
+exp(coef(poisson.fit))
+```
+
+* The coefficient was negative, so it decreases breaks
+
+* Compared to wool A, the number of breaks for `woolB` is predicted to be $(1-0.813) * 100$ `r (1-0.813) * 100`% lower. 
+
+# Let's practice!
